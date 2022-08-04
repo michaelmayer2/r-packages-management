@@ -1,0 +1,109 @@
+---
+title: "R package management"
+author: "Michael Mayer"
+format: pdf
+execute:
+  echo: true
+editor: visual
+---
+
+## Introduction
+
+This document describes a potential setup of R & RStudio pro products at Illumnina in the context of GxP.
+
+For now the focus of this document will be on the usage of R but later versions will also describe Python usage.
+
+## Initial conditions
+
+-   A process on how to test/validate R packages exists and has been developed by Illumina
+-   Execution environment will be completely air-gapped/offline (Exception RStudio Package Manager (RSPM))
+-   Both RStudio Workbench (RSW) and RStudio Connect (RSC) will be installed in HA/LB mode (2 nodes in active-active node)
+
+## General ideas
+
+-   RSPM is used for creating versioned package repositories (curated CRAN repos mixed with in-house developed packages)
+-   Validated/Tested packages on RSW will be preinstalled and user package installation disabled
+-   Repositories will be set and in RSW so that published artefacts in RSC use consistent set of packages
+
+## A note on the RStudio IDE and its dependency on R packages.
+
+The RStudio IDE needs a number of R packages to make the integration with `rmarkdown`, `shiny`, `git` etc... work. In an environment that is not air-gapped/offline, those packages are always installed on-demand. This is not possible in this setup unless the packages are available on RSPM. In addition, those packages also need to be tested/validated so they can be used.
+
+From a validation/testing perspective one could argue that any of the packages considered are only used on a *transport layer* (e.g. for rendering outputs, connecting to data bases, version control systems. etc...) The successful use of those packages during code/app development is evidence that those packges work. Hence testing of those packages can be very light or even not tested. Additionally neither of those *transport layer* packages do any modeling or heavy number crunching that is used to inform critical decisions. They are merely supportive of producing outputs etc...
+
+## The case for 3 system libraries
+
+Any installation of R already brings its own system library, typically stored in `${R_HOME}/library`. In addition we have to provision an additional library for the IDE dependencies (transport layer) and the validated packages.
+
+Most likely the IDE dependencies and the validated packages will be part of the same time-based snapshot as well live in the same R library. For the sake of argument we keep the two separate.
+
+On the packagemanager any repository will be uniquely referenced by the name and the snapshot date (more to be explored).
+
+Let's assume that the R packages are being installed in a shared location, say `/data/R`. There will be subfolders named `<RVersion X.Y>/validated` and `<RVersion X.Y>/ide-packages`
+
+## Installing validated and transport layer packages for a given R version
+
+### Transport layer packages
+
+The *transport layer* R packages are defined in the [RStudio IDE](https://github.com/rstudio/rstudio/blob/main/src/cpp/session/resources/dependencies/r-packages.json). The JSON structure can be used to selectively extract all the packages needed for a certain feature, e.g.
+
+```{r}
+data<-jsonlite::read_json("https://raw.githubusercontent.com/rstudio/rstudio/main/src/cpp/session/resources/dependencies/r-packages.json")
+names(data$feature)
+```
+
+You now can select the features you would like and extract the appropriate packages, e.g.
+
+```{r}
+packages<- c(data$features$renv$packages, 
+  data$features$shiny$packages,
+  data$features$markdown$packages)
+```
+
+Finally you can simply install the packages
+
+```{r}
+packages
+install.packages(unlist(packages),repos="https://packagemanager.mycorp.com/ide-packages/latest", paste0("/data/R/",R.version$major,".",substr(R.version$minor,1,1),"/ide-packages"))
+```
+
+Finally, if the appropriate packages are installed, the IDE can be configured so that it does not always runs the checks every time by setting
+
+```{bash}
+RSTUDIO_DISABLE_PACKAGE_INSTALL_PROMPT=yes
+```
+
+in `rsession-profile`.
+
+### Validated packages
+
+The *validated* R packages can be installed by getting the list of available packages in the validated repository
+
+```{r}
+valpackages<-as.data.frame(available.packages(repos="https://packagemanager.mycorp.com/validated/latest"))$Package
+```
+
+and finally those packages can be installed via
+
+```{r}
+install.packages(valpackages,repos="https://packagemanager.mycorp.com/validated/latest",paste0("/data/R/",R.version$major,".",substr(R.version$minor,1,1),"/validated"))
+```
+
+## Configuring RSW
+
+The above puts some added complexity to the RSW configuration. We need to use [Extended R version definitions](https://docs.rstudio.com/ide/server-pro/latest/r_versions/using_multiple_versions_of_r.html#extended-r-version-definitions).
+
+This can be achieved in `/etc/rstudio/r-versions`.
+
+    # /etc/rstudio/r-versions
+    Path: /opt/R/4.2.1
+    Label: R 4.2.1 - V0
+    Repo: r-4.2.1.repos.conf
+    Library: /data/R/4.2/ide-packages:/data/R/4.2/validated
+
+where `r-4.2.1.repos.conf` contains
+
+    CRAN="https://packagemanager.mycorp.com/validated/latest"
+    IDE="https://packagemanager.mycorp.com/ide-packages/latest"
+
+*Important* - One of the repositories must be named "CRAN" - otherwise RSW will happily use `cran.rstudio.com` as CRAN repository.
