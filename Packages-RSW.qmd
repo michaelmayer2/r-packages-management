@@ -9,13 +9,13 @@ editor: visual
 
 ## Introduction
 
-This document describes a potential setup of R & RStudio pro products at Illumnina in the context of GxP.
+This document describes a potential setup of R & RStudio pro products in the context of GxP.
 
 For now the focus of this document will be on the usage of R but later versions will also describe Python usage.
 
 ## Initial conditions
 
--   A process on how to test/validate R packages exists and has been developed by Illumina
+-   A process on how to test/validate R packages exists and has been developed
 -   Execution environment will be completely air-gapped/offline (Exception RStudio Package Manager (RSPM))
 -   Both RStudio Workbench (RSW) and RStudio Connect (RSC) will be installed in HA/LB mode (2 nodes in active-active node)
 
